@@ -1,0 +1,43 @@
+---
+- name: Deploy web application
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create app directory
+      file:
+        path: /opt/webapp
+        state: directory
+        mode: '0755'
+
+    - name: Copy Dockerfile
+      copy:
+        src: ../../app/Dockerfile
+        dest: /opt/webapp/Dockerfile
+
+    - name: Copy application files
+      copy:
+        src: ../../app/index.html
+        dest: /opt/webapp/index.html
+
+    - name: Build Docker image
+      docker_image:
+        name: simple-web-app
+        build:
+          path: /opt/webapp
+        source: build
+        state: present
+
+    - name: Stop existing container
+      docker_container:
+        name: webapp
+        state: absent
+      ignore_errors: yes
+
+    - name: Run Docker container
+      docker_container:
+        name: webapp
+        image: simple-web-app
+        state: started
+        restart_policy: always
+        ports:
+          - "80:80"
