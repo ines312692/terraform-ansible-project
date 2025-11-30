@@ -11,62 +11,32 @@ provider "aws" {
   region = var.aws_region
 }
 
-# VPC
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+# Data sources pour utiliser les ressources existantes
+data "aws_vpc" "default" {
+  default = true
+}
 
-  tags = {
-    Name = "${var.project_name}-vpc"
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
   }
 }
 
-# Internet Gateway
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "${var.project_name}-igw"
-  }
+data "aws_subnet" "selected" {
+  id = data.aws_subnets.default.ids[0]
 }
 
-# Public Subnet
-resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "${var.aws_region}a"
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "${var.project_name}-public-subnet"
-  }
-}
-
-# Route Table
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
-  }
-
-  tags = {
-    Name = "${var.project_name}-public-rt"
-  }
-}
-
-resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public.id
+# Random ID pour noms uniques
+resource "random_id" "suffix" {
+  byte_length = 4
 }
 
 # Security Group
 resource "aws_security_group" "web_server" {
-  name        = "${var.project_name}-web-sg"
+  name        = "lab-web-sg-${random_id.suffix.hex}"
   description = "Security group for web servers"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.default.id
 
   ingress {
     description = "SSH"
@@ -92,14 +62,8 @@ resource "aws_security_group" "web_server" {
   }
 
   tags = {
-    Name = "${var.project_name}-web-sg"
+    Name = "lab-web-sg"
   }
-}
-
-# Key Pair (à créer d'abord via AWS CLI ou Console)
-resource "aws_key_pair" "deployer" {
-  key_name   = "${var.project_name}-key"
-  public_key = file(var.ssh_public_key_path)
 }
 
 # EC2 Instances
@@ -107,12 +71,12 @@ resource "aws_instance" "web" {
   count                  = 2
   ami                    = var.ami_id
   instance_type          = "t2.micro"
-  key_name               = aws_key_pair.deployer.key_name
   vpc_security_group_ids = [aws_security_group.web_server.id]
-  subnet_id              = aws_subnet.public.id
+  subnet_id              = data.aws_subnet.selected.id
+  key_name               = var.vocareum_key_name
 
   tags = {
-    Name        = "${var.project_name}-web-${count.index + 1}"
+    Name        = "lab-web-${count.index + 1}"
     Environment = "learning"
     Ansible     = "managed"
   }
@@ -124,15 +88,3 @@ resource "aws_instance" "web" {
               EOF
 }
 
-# S3 Bucket pour logs
-resource "aws_s3_bucket" "logs" {
-  bucket = "${var.project_name}-logs-${random_id.bucket_suffix.hex}"
-
-  tags = {
-    Name = "${var.project_name}-logs"
-  }
-}
-
-resource "random_id" "bucket_suffix" {
-  byte_length = 4
-}
